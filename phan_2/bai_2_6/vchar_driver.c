@@ -10,12 +10,13 @@
 #include <linux/fs.h> /* thu vien nay dinh nghia cac ham cap phat/giai phong device number */
 #include <linux/device.h> /* thu vien nay chua cac ham phuc vu viec tao device file */
 #include <linux/slab.h> /* thu vien nay chua cac ham kmalloc va kfree */
+#include <linux/cdev.h> /* thu vien nay chua cac ham lam viec voi cdev */
 
 #include "vchar_driver.h" /* thu vien mo ta cac thanh ghi cua vchar device */
 
 #define DRIVER_AUTHOR "Nguyen Tien Dat <dat.a3cbq91@gmail.com>"
 #define DRIVER_DESC   "A sample character device driver"
-#define DRIVER_VERSION "0.5"
+#define DRIVER_VERSION "0.6"
 
 typedef struct vchar_dev {
 	unsigned char * control_regs;
@@ -28,6 +29,8 @@ struct _vchar_drv {
 	struct class *dev_class;
 	struct device *dev;
 	vchar_dev_t * vchar_hw;
+	struct cdev *vcdev;
+	unsigned int open_cnt;
 } vchar_drv;
 
 /****************************** device specific - START *****************************/
@@ -72,6 +75,25 @@ void vchar_hw_exit(vchar_dev_t *hw)
 
 /******************************** OS specific - START *******************************/
 /* cac ham entry points */
+static int vchar_driver_open(struct inode *inode, struct file *filp)
+{
+	vchar_drv.open_cnt++;
+	printk("Handle opened event (%d)\n", vchar_drv.open_cnt);
+	return 0;
+}
+
+static int vchar_driver_release(struct inode *inode, struct file *filp)
+{
+	printk("Handle closed event\n");
+	return 0;
+}
+
+static struct file_operations fops =
+{
+	.owner   = THIS_MODULE,
+	.open    = vchar_driver_open,
+	.release = vchar_driver_release,
+};
 
 /* ham khoi tao driver */
 static int __init vchar_driver_init(void)
@@ -115,12 +137,25 @@ static int __init vchar_driver_init(void)
 	}
 
 	/* dang ky cac entry point voi kernel */
+	vchar_drv.vcdev = cdev_alloc();
+	if(vchar_drv.vcdev == NULL) {
+		printk("failed to allocate cdev structure\n");
+		goto failed_allocate_cdev;
+	}
+	cdev_init(vchar_drv.vcdev, &fops);
+	ret = cdev_add(vchar_drv.vcdev, vchar_drv.dev_num, 1);
+	if(ret < 0) {
+		printk("failed to add a char device to the system\n");
+		goto failed_allocate_cdev;
+	}
 
 	/* dang ky ham xu ly ngat */
 
 	printk("Initialize vchar driver successfully\n");
 	return 0;
 
+failed_allocate_cdev:
+	vchar_hw_exit(vchar_drv.vchar_hw);
 failed_init_hw:
 	kfree(vchar_drv.vchar_hw);
 failed_allocate_structure:
@@ -139,6 +174,7 @@ static void __exit vchar_driver_exit(void)
 	/* huy dang ky xu ly ngat */
 
 	/* huy dang ky entry point voi kernel */
+	cdev_del(vchar_drv.vcdev);
 
 	/* giai phong thiet bi vat ly */
 	vchar_hw_exit(vchar_drv.vchar_hw);
