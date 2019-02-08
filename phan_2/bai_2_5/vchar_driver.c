@@ -9,21 +9,54 @@
 #include <linux/module.h> /* thu vien nay dinh nghia cac macro nhu module_init va module_exit */
 #include <linux/fs.h> /* thu vien nay dinh nghia cac ham cap phat/giai phong device number */
 #include <linux/device.h> /* thu vien nay chua cac ham phuc vu viec tao device file */
+#include <linux/slab.h> /* thu vien nay chua cac ham kmalloc va kfree */
+
+#include "vchar_driver.h" /* thu vien mo ta cac thanh ghi cua vchar device */
 
 #define DRIVER_AUTHOR "Nguyen Tien Dat <dat.a3cbq91@gmail.com>"
 #define DRIVER_DESC   "A sample character device driver"
-#define DRIVER_VERSION "0.4"
+#define DRIVER_VERSION "0.5"
+
+typedef struct vchar_dev {
+	unsigned char * control_regs;
+	unsigned char * status_regs;
+	unsigned char * data_regs;
+} vchar_dev_t;
 
 struct _vchar_drv {
 	dev_t dev_num;
 	struct class *dev_class;
 	struct device *dev;
+	vchar_dev_t * vchar_hw;
 } vchar_drv;
 
 /****************************** device specific - START *****************************/
 /* ham khoi tao thiet bi */
+int vchar_hw_init(vchar_dev_t *hw)
+{
+	char * buf;
+	buf = kzalloc(NUM_DEV_REGS * REG_SIZE, GFP_KERNEL);
+	if (!buf) {
+		return -ENOMEM;
+	}
+
+	hw->control_regs = buf;
+	hw->status_regs = hw->control_regs + NUM_CTRL_REGS;
+	hw->data_regs = hw->status_regs + NUM_STS_REGS;
+
+	//khoi tao gia tri ban dau cho cac thanh ghi
+	hw->control_regs[CONTROL_ACCESS_REG] = 0x03;
+	hw->status_regs[DEVICE_STATUS_REG] = 0x03;
+
+	return 0;
+}
 
 /* ham giai phong thiet bi */
+void vchar_hw_exit(vchar_dev_t *hw)
+{
+	kfree(hw->control_regs);
+}
+
 
 /* ham doc tu cac thanh ghi du lieu cua thiet bi */
 
@@ -67,8 +100,19 @@ static int __init vchar_driver_init(void)
 	}
 
 	/* cap phat bo nho cho cac cau truc du lieu cua driver va khoi tao */
+	vchar_drv.vchar_hw = kzalloc(sizeof(vchar_dev_t), GFP_KERNEL);
+	if(!vchar_drv.vchar_hw) {
+		printk("failed to allocate data structure of the driver\n");
+		ret = -ENOMEM;
+		goto failed_allocate_structure;
+	}
 
 	/* khoi tao thiet bi vat ly */
+	ret = vchar_hw_init(vchar_drv.vchar_hw);
+	if(ret < 0) {
+		printk("failed to initialize a virtual character device\n");
+		goto failed_init_hw;
+	}
 
 	/* dang ky cac entry point voi kernel */
 
@@ -77,6 +121,10 @@ static int __init vchar_driver_init(void)
 	printk("Initialize vchar driver successfully\n");
 	return 0;
 
+failed_init_hw:
+	kfree(vchar_drv.vchar_hw);
+failed_allocate_structure:
+	device_destroy(vchar_drv.dev_class, vchar_drv.dev_num);
 failed_create_device:
 	class_destroy(vchar_drv.dev_class);
 failed_create_class:
@@ -93,8 +141,10 @@ static void __exit vchar_driver_exit(void)
 	/* huy dang ky entry point voi kernel */
 
 	/* giai phong thiet bi vat ly */
+	vchar_hw_exit(vchar_drv.vchar_hw);
 
 	/* giai phong bo nho da cap phat cau truc du lieu cua driver */
+	kfree(vchar_drv.vchar_hw);
 
 	/* xoa bo device file */
 	device_destroy(vchar_drv.dev_class, vchar_drv.dev_num);
