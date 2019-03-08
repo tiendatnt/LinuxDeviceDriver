@@ -18,7 +18,7 @@
 
 #define DRIVER_AUTHOR "Nguyen Tien Dat <dat.a3cbq91@gmail.com>"
 #define DRIVER_DESC   "A sample character device driver"
-#define DRIVER_VERSION "0.8"
+#define DRIVER_VERSION "1.0"
 #define MAGICAL_NUMBER 243
 #define VCHAR_CLR_DATA_REGS _IO(MAGICAL_NUMBER, 0)
 #define VCHAR_GET_STS_REGS  _IOR(MAGICAL_NUMBER, 1, sts_regs_t *)
@@ -192,13 +192,13 @@ void vchar_hw_enable_write(vchar_dev_t *hw, unsigned char isEnable)
 static int vchar_driver_open(struct inode *inode, struct file *filp)
 {
 	vchar_drv.open_cnt++;
-	printk("Handle opened event (%d)\n", vchar_drv.open_cnt);
+	printk(KERN_INFO "Handle opened event (%d)\n", vchar_drv.open_cnt);
 	return 0;
 }
 
 static int vchar_driver_release(struct inode *inode, struct file *filp)
 {
-	printk("Handle closed event\n");
+	printk(KERN_INFO "Handle closed event\n");
 	return 0;
 }
 
@@ -207,14 +207,14 @@ static ssize_t vchar_driver_read(struct file *filp, char __user *user_buf, size_
 	char *kernel_buf = NULL;
 	int num_bytes = 0;
 
-	printk("Handle read event start from %lld, %zu bytes\n", *off, len);
+	printk(KERN_INFO "Handle read event start from %lld, %zu bytes\n", *off, len);
 
 	kernel_buf = kzalloc(len, GFP_KERNEL);
 	if(kernel_buf == NULL)
 		return 0;
 
 	num_bytes = vchar_hw_read_data(vchar_drv.vchar_hw, *off, len, kernel_buf);
-	printk("read %d bytes from HW\n", num_bytes);
+	printk(KERN_INFO "read %d bytes from HW\n", num_bytes);
 
 	if(num_bytes < 0)
 		return -EFAULT;
@@ -229,14 +229,14 @@ static ssize_t vchar_driver_write(struct file *filp, const char __user *user_buf
 {
 	char *kernel_buf = NULL;
 	int num_bytes = 0;
-	printk("Handle write event start from %lld, %zu bytes\n", *off, len);
+	printk(KERN_INFO "Handle write event start from %lld, %zu bytes\n", *off, len);
 
 	kernel_buf = kzalloc(len, GFP_KERNEL);
 	if(copy_from_user(kernel_buf, user_buf, len))
 		return -EFAULT;
 
 	num_bytes = vchar_hw_write_data(vchar_drv.vchar_hw, *off, len, kernel_buf);
-	printk("writes %d bytes to HW\n", num_bytes);
+	printk(KERN_INFO "writes %d bytes to HW\n", num_bytes);
 
 	if(num_bytes < 0)
 		return -EFAULT;
@@ -248,16 +248,16 @@ static ssize_t vchar_driver_write(struct file *filp, const char __user *user_buf
 static long vchar_driver_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
 	int ret = 0;
-	printk("Handle ioctl event (cmd: %u)\n", cmd);
+	printk(KERN_INFO "Handle ioctl event (cmd: %u)\n", cmd);
 
 	switch(cmd) {
 		case VCHAR_CLR_DATA_REGS:
 		{
 			ret = vchar_hw_clear_data(vchar_drv.vchar_hw);
 			if (ret < 0)
-				printk("Can not clear data registers\n");
+				printk(KERN_WARNING "Can not clear data registers\n");
 			else
-				printk("Data registers have been cleared\n");
+				printk(KERN_INFO "Data registers have been cleared\n");
 		}
 			break;
 		case VCHAR_SET_RD_DATA_REGS:
@@ -265,7 +265,7 @@ static long vchar_driver_ioctl(struct file *filp, unsigned int cmd, unsigned lon
 			unsigned char isReadEnable;
 			copy_from_user(&isReadEnable, (unsigned char*)arg, sizeof(isReadEnable));
 			vchar_hw_enable_read(vchar_drv.vchar_hw, isReadEnable);
-			printk("Data registers have been %s to read\n", (isReadEnable == ENABLE)?"enabled":"disabled");
+			printk(KERN_INFO "Data registers have been %s to read\n", (isReadEnable == ENABLE)?"enabled":"disabled");
 		}
 			break;
 		case VCHAR_SET_WR_DATA_REGS:
@@ -273,7 +273,7 @@ static long vchar_driver_ioctl(struct file *filp, unsigned int cmd, unsigned lon
 			unsigned char isWriteEnable;
 			copy_from_user(&isWriteEnable, (unsigned char*)arg, sizeof(isWriteEnable));
 			vchar_hw_enable_write(vchar_drv.vchar_hw, isWriteEnable);
-			printk("Data registers have been %s to write\n", (isWriteEnable == ENABLE)?"enabled":"disabled");
+			printk(KERN_INFO "Data registers have been %s to write\n", (isWriteEnable == ENABLE)?"enabled":"disabled");
 		}
 			break;
 		case VCHAR_GET_STS_REGS:
@@ -281,7 +281,7 @@ static long vchar_driver_ioctl(struct file *filp, unsigned int cmd, unsigned lon
 			sts_regs_t status;
 			vchar_hw_get_status(vchar_drv.vchar_hw, &status);
 			copy_to_user((sts_regs_t*)arg, &status, sizeof(status));
-			printk("Got information from status registers\n");
+			printk(KERN_INFO "Got information from status registers\n");
 		}
 			break;
 	}
@@ -307,27 +307,27 @@ static int __init vchar_driver_init(void)
 	vchar_drv.dev_num = 0;
 	ret = alloc_chrdev_region(&vchar_drv.dev_num, 0, 1, "vchar_device");
 	if (ret < 0) {
-		printk("failed to register device number dynamically\n");
+		printk(KERN_ERR "failed to register device number dynamically\n");
 		goto failed_register_devnum;
 	}
-	printk("allocated device number (%d,%d)\n", MAJOR(vchar_drv.dev_num), MINOR(vchar_drv.dev_num));
+	printk(KERN_INFO "allocated device number (%d,%d)\n", MAJOR(vchar_drv.dev_num), MINOR(vchar_drv.dev_num));
 
 	/* tao device file */
 	vchar_drv.dev_class = class_create(THIS_MODULE, "class_vchar_dev");
 	if(vchar_drv.dev_class == NULL) {
-		printk("failed to create a device class\n");
+		printk(KERN_ERR "failed to create a device class\n");
 		goto failed_create_class;
 	}
 	vchar_drv.dev = device_create(vchar_drv.dev_class, NULL, vchar_drv.dev_num, NULL, "vchar_dev");
 	if(IS_ERR(vchar_drv.dev)) {
-		printk("failed to create a device\n");
+		printk(KERN_ERR "failed to create a device\n");
 		goto failed_create_device;
 	}
 
 	/* cap phat bo nho cho cac cau truc du lieu cua driver va khoi tao */
 	vchar_drv.vchar_hw = kzalloc(sizeof(vchar_dev_t), GFP_KERNEL);
 	if(!vchar_drv.vchar_hw) {
-		printk("failed to allocate data structure of the driver\n");
+		printk(KERN_ERR "failed to allocate data structure of the driver\n");
 		ret = -ENOMEM;
 		goto failed_allocate_structure;
 	}
@@ -335,26 +335,26 @@ static int __init vchar_driver_init(void)
 	/* khoi tao thiet bi vat ly */
 	ret = vchar_hw_init(vchar_drv.vchar_hw);
 	if(ret < 0) {
-		printk("failed to initialize a virtual character device\n");
+		printk(KERN_ERR "failed to initialize a virtual character device\n");
 		goto failed_init_hw;
 	}
 
 	/* dang ky cac entry point voi kernel */
 	vchar_drv.vcdev = cdev_alloc();
 	if(vchar_drv.vcdev == NULL) {
-		printk("failed to allocate cdev structure\n");
+		printk(KERN_ERR "failed to allocate cdev structure\n");
 		goto failed_allocate_cdev;
 	}
 	cdev_init(vchar_drv.vcdev, &fops);
 	ret = cdev_add(vchar_drv.vcdev, vchar_drv.dev_num, 1);
 	if(ret < 0) {
-		printk("failed to add a char device to the system\n");
+		printk(KERN_ERR "failed to add a char device to the system\n");
 		goto failed_allocate_cdev;
 	}
 
 	/* dang ky ham xu ly ngat */
 
-	printk("Initialize vchar driver successfully\n");
+	printk(KERN_INFO "Initialize vchar driver successfully\n");
 	return 0;
 
 failed_allocate_cdev:
@@ -392,7 +392,7 @@ static void __exit vchar_driver_exit(void)
 	/* giai phong device number */
 	unregister_chrdev_region(vchar_drv.dev_num, 1);
 
-	printk("Exit vchar driver\n");
+	printk(KERN_INFO "Exit vchar driver\n");
 }
 /********************************* OS specific - END ********************************/
 
