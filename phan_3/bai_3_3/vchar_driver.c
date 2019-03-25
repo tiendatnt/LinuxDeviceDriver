@@ -13,12 +13,13 @@
 #include <linux/cdev.h> /* thu vien nay chua cac ham lam viec voi cdev */
 #include <linux/uaccess.h> /* thu vien nay chua cac ham trao doi du lieu giua user va kernel */
 #include <linux/ioctl.h> /* thu vien nay chua cac ham phuc vu ioctl */
+#include <linux/proc_fs.h> /* thu vien nay chua cac ham tao/huy file trong procfs */
 
 #include "vchar_driver.h" /* thu vien mo ta cac thanh ghi cua vchar device */
 
 #define DRIVER_AUTHOR "Nguyen Tien Dat <dat.a3cbq91@gmail.com>"
 #define DRIVER_DESC   "A sample character device driver"
-#define DRIVER_VERSION "1.0"
+#define DRIVER_VERSION "1.3"
 #define MAGICAL_NUMBER 243
 #define VCHAR_CLR_DATA_REGS _IO(MAGICAL_NUMBER, 0)
 #define VCHAR_GET_STS_REGS  _IOR(MAGICAL_NUMBER, 1, sts_regs_t *)
@@ -298,6 +299,57 @@ static struct file_operations fops =
 	.unlocked_ioctl = vchar_driver_ioctl,
 };
 
+static int vchar_proc_open(struct inode *inode, struct file *filp)
+{
+	printk(KERN_INFO "Handle opened event on proc file\n");
+	return 0;
+}
+
+static int vchar_proc_release(struct inode *inode, struct file *filp)
+{
+	printk(KERN_INFO "Handle closed event on proc file\n");
+	return 0;
+}
+
+static ssize_t vchar_proc_read(struct file *filp, char __user *user_buf, size_t len, loff_t *off)
+{
+	char tmp[256];
+	unsigned int idx = 0;
+	unsigned int read_count, write_count;
+	sts_regs_t status;
+
+	printk(KERN_INFO "Handle reading event on proc file, start from %lld, %zu bytes\n", *off, len);
+	if (*off > 0)
+		return 0;
+
+	vchar_hw_get_status(vchar_drv.vchar_hw, &status);
+	read_count = status.read_count_h_reg << 8 | status.read_count_l_reg;
+	write_count = status.write_count_h_reg << 8 | status.write_count_l_reg;
+
+	idx += sprintf(tmp + idx, "read_count: %u\n", read_count);
+	idx += sprintf(tmp + idx, "write_count: %u\n", write_count);
+	idx += sprintf(tmp + idx, "device_status: 0x%02x\n", status.device_status_reg);
+
+	copy_to_user(user_buf, tmp, idx);
+	*off += idx;
+
+	return idx;
+}
+
+static ssize_t vchar_proc_write(struct file *filp, const char __user *user_buf, size_t len, loff_t *off)
+{
+	printk(KERN_INFO "No action to handle writing event on proc file\n");
+	return len;
+}
+
+static struct file_operations proc_fops =
+{
+	.open    = vchar_proc_open,
+	.release = vchar_proc_release,
+	.read    = vchar_proc_read,
+	.write   = vchar_proc_write,
+};
+
 /* ham khoi tao driver */
 static int __init vchar_driver_init(void)
 {
@@ -354,9 +406,16 @@ static int __init vchar_driver_init(void)
 
 	/* dang ky ham xu ly ngat */
 
+	/* tao file /proc/vchar_proc. Vai tro cua file nay tuong tu VCHAR_GET_STS_REGS */
+	if(NULL == proc_create("vchar_proc", 0666, NULL, &proc_fops)) {
+		printk(KERN_ERR "failed to create file in procfs\n");
+		goto failed_create_proc;
+	}
+
 	printk(KERN_INFO "Initialize vchar driver successfully\n");
 	return 0;
 
+failed_create_proc:
 failed_allocate_cdev:
 	vchar_hw_exit(vchar_drv.vchar_hw);
 failed_init_hw:
@@ -374,6 +433,9 @@ failed_register_devnum:
 /* ham ket thuc driver */
 static void __exit vchar_driver_exit(void)
 {
+	/* huy file /proc/vchar_proc */
+	remove_proc_entry("vchar_proc", NULL);
+
 	/* huy dang ky xu ly ngat */
 
 	/* huy dang ky entry point voi kernel */
