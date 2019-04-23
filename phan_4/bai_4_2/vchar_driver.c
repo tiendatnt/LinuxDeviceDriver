@@ -16,12 +16,14 @@
 #include <linux/proc_fs.h> /* thu vien nay chua cac ham tao/huy file trong procfs */
 #include <linux/timekeeping.h> /* thu vien nay chua cac ham de lay wall time */
 #include <linux/jiffies.h> /* thu vien nay chua cac ham de lay system uptime */
+#include <linux/sched.h> /* thu vien nay chua cac ham lien quan toi lap lich */
+#include <linux/delay.h> /* thu vien nay chua cac ham lien quan toi delay va sleep */
 
 #include "vchar_driver.h" /* thu vien mo ta cac thanh ghi cua vchar device */
 
 #define DRIVER_AUTHOR "Nguyen Tien Dat <dat.a3cbq91@gmail.com>"
 #define DRIVER_DESC   "A sample character device driver"
-#define DRIVER_VERSION "2.0"
+#define DRIVER_VERSION "2.1"
 #define MAGICAL_NUMBER 243
 #define VCHAR_CLR_DATA_REGS _IO(MAGICAL_NUMBER, 0)
 #define VCHAR_GET_STS_REGS  _IOR(MAGICAL_NUMBER, 1, sts_regs_t *)
@@ -222,6 +224,9 @@ static ssize_t vchar_driver_read(struct file *filp, char __user *user_buf, size_
 	if(kernel_buf == NULL)
 		return 0;
 
+	set_current_state(TASK_UNINTERRUPTIBLE);
+	schedule_timeout(10*HZ);
+
 	num_bytes = vchar_hw_read_data(vchar_drv.vchar_hw, *off, len, kernel_buf);
 	printk(KERN_INFO "read %d bytes from HW\n", num_bytes);
 
@@ -246,6 +251,9 @@ static ssize_t vchar_driver_write(struct file *filp, const char __user *user_buf
 	kernel_buf = kzalloc(len, GFP_KERNEL);
 	if(copy_from_user(kernel_buf, user_buf, len))
 		return -EFAULT;
+
+	mdelay(10000); //cho theo kieu busy-wait
+	//ssleep(10); //cho theo kieu sleep
 
 	num_bytes = vchar_hw_write_data(vchar_drv.vchar_hw, *off, len, kernel_buf);
 	printk(KERN_INFO "writes %d bytes to HW\n", num_bytes);
