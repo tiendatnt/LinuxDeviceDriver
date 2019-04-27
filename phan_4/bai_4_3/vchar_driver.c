@@ -16,12 +16,13 @@
 #include <linux/proc_fs.h> /* thu vien nay chua cac ham tao/huy file trong procfs */
 #include <linux/timekeeping.h> /* thu vien nay chua cac ham de lay wall time */
 #include <linux/jiffies.h> /* thu vien nay chua cac ham de lay system uptime */
+#include <linux/timer.h> /* thu vien nay chua cac ham thao tac voi kernel timer */
 
 #include "vchar_driver.h" /* thu vien mo ta cac thanh ghi cua vchar device */
 
 #define DRIVER_AUTHOR "Nguyen Tien Dat <dat.a3cbq91@gmail.com>"
 #define DRIVER_DESC   "A sample character device driver"
-#define DRIVER_VERSION "2.0"
+#define DRIVER_VERSION "2.3"
 #define MAGICAL_NUMBER 243
 #define VCHAR_CLR_DATA_REGS _IO(MAGICAL_NUMBER, 0)
 #define VCHAR_GET_STS_REGS  _IOR(MAGICAL_NUMBER, 1, sts_regs_t *)
@@ -50,7 +51,13 @@ struct _vchar_drv {
 	struct cdev *vcdev;
 	unsigned int open_cnt;
 	unsigned long start_time;
+	struct timer_list vchar_ktimer;
 } vchar_drv;
+
+typedef struct vchar_ktimer_data {
+	int param1;
+	int param2;
+} vchar_ktimer_data_t;
 
 /****************************** device specific - START *****************************/
 /* ham khoi tao thiet bi */
@@ -361,6 +368,39 @@ static struct file_operations proc_fops =
 	.write   = vchar_proc_write,
 };
 
+static void handle_timer(unsigned long data)
+{
+	/* lay du lieu */
+	vchar_ktimer_data_t *pdata = (vchar_ktimer_data_t*)data;
+	if(!pdata) {
+		printk(KERN_ERR "can not handle a NULL pointer\n");
+		return;
+	}
+
+	/* xu ly du lieu */
+	++pdata->param1;
+	--pdata->param2;
+	printk(KERN_INFO "Information: %d & %d\n", pdata->param1, pdata->param2);
+
+	/*
+	 * Neu muon kernel timer tiep tuc hoat dong thi can
+	 * thay doi thoi diem bao thuc.
+	 */
+	mod_timer(&vchar_drv.vchar_ktimer, jiffies + 10*HZ);
+}
+
+static void configure_timer(struct timer_list *ktimer)
+{
+	static vchar_ktimer_data_t data = {
+		.param1 = 0,
+		.param2 = 0
+	};
+	ktimer->expires = jiffies + 10*HZ;
+	ktimer->function = handle_timer;
+	ktimer->data = (unsigned long)&data;
+}
+
+
 /* ham khoi tao driver */
 static int __init vchar_driver_init(void)
 {
@@ -423,6 +463,11 @@ static int __init vchar_driver_init(void)
 		goto failed_create_proc;
 	}
 
+	/* khoi tao, cau hinh va dang ki kernel timer voi Linux kernel */
+	init_timer(&vchar_drv.vchar_ktimer);
+	configure_timer(&vchar_drv.vchar_ktimer);
+	add_timer(&vchar_drv.vchar_ktimer);
+
 	printk(KERN_INFO "Initialize vchar driver successfully\n");
 	return 0;
 
@@ -444,6 +489,9 @@ failed_register_devnum:
 /* ham ket thuc driver */
 static void __exit vchar_driver_exit(void)
 {
+	/* huy kernel timer */
+	del_timer(&vchar_drv.vchar_ktimer);
+
 	/* huy file /proc/vchar_proc */
 	remove_proc_entry("vchar_proc", NULL);
 
