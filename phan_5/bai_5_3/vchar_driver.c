@@ -23,7 +23,7 @@
 
 #define DRIVER_AUTHOR "Nguyen Tien Dat <dat.a3cbq91@gmail.com>"
 #define DRIVER_DESC   "A sample character device driver"
-#define DRIVER_VERSION "3.0"
+#define DRIVER_VERSION "3.2"
 #define MAGICAL_NUMBER 243
 #define IRQ_NUMBER 11
 #define VCHAR_CLR_DATA_REGS _IO(MAGICAL_NUMBER, 0)
@@ -53,6 +53,7 @@ struct _vchar_drv {
 	struct cdev *vcdev;
 	unsigned int open_cnt;
 	volatile uint32_t intr_cnt;
+	struct tasklet_struct *vchar_dynamic_tasklet;
 	unsigned long start_time;
 	struct timer_list vchar_ktimer;
 } vchar_drv;
@@ -198,12 +199,19 @@ void vchar_hw_enable_write(vchar_dev_t *hw, unsigned char isEnable)
 }
 
 /* ham xu ly tin hieu ngat gui tu thiet bi */
+void vchar_hw_bh_task(unsigned long arg)
+{
+	uint32_t* intr_cnt = (uint32_t *)arg;
+	printk(KERN_INFO "[Tasks in bottom-half][Tasklet][CPU %d] interrupt counter = %d\n", smp_processor_id(), *intr_cnt);
+}
+
 irqreturn_t vchar_hw_isr(int irq, void *dev)
 {
 	/* xu ly cac cong viec thuoc phan top-half */
 	vchar_drv.intr_cnt++;
 
 	/* kich hoat ham xu ly cac cong viec thuoc phan bottom-half */
+	tasklet_schedule(vchar_drv.vchar_dynamic_tasklet);
 
 	return IRQ_HANDLED;
 }
@@ -475,6 +483,13 @@ static int __init vchar_driver_init(void)
 		goto failed_allocate_cdev;
 	}
 
+	vchar_drv.vchar_dynamic_tasklet = kzalloc(sizeof(struct tasklet_struct), GFP_KERNEL);
+	if(vchar_drv.vchar_dynamic_tasklet == NULL) {
+		printk(KERN_ERR "failed to allocate memory for tasklet\n");
+		goto failed_allocate_tasklet;
+	}
+	tasklet_init(vchar_drv.vchar_dynamic_tasklet, vchar_hw_bh_task, (unsigned long)&vchar_drv.intr_cnt);
+
 	/* tao file /proc/vchar_proc. Vai tro cua file nay tuong tu VCHAR_GET_STS_REGS */
 	if(NULL == proc_create("vchar_proc", 0666, NULL, &proc_fops)) {
 		printk(KERN_ERR "failed to create file in procfs\n");
@@ -490,6 +505,8 @@ static int __init vchar_driver_init(void)
 	return 0;
 
 failed_create_proc:
+	tasklet_kill(vchar_drv.vchar_dynamic_tasklet);
+failed_allocate_tasklet:
 	free_irq(IRQ_NUMBER, &(vchar_drv.vcdev));
 failed_allocate_cdev:
 	vchar_hw_exit(vchar_drv.vchar_hw);
@@ -515,6 +532,7 @@ static void __exit vchar_driver_exit(void)
 	remove_proc_entry("vchar_proc", NULL);
 
 	/* huy dang ky xu ly ngat */
+	tasklet_kill(vchar_drv.vchar_dynamic_tasklet);
 	free_irq(IRQ_NUMBER, &(vchar_drv.vcdev));
 
 	/* huy dang ky entry point voi kernel */
