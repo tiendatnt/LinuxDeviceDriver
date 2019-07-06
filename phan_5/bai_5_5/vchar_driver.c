@@ -18,12 +18,13 @@
 #include <linux/jiffies.h> /* thu vien nay chua cac ham de lay system uptime */
 #include <linux/timer.h> /* thu vien nay chua cac ham thao tac voi kernel timer */
 #include<linux/interrupt.h> /* thu vien chua cac ham dang ky va dieu khien ngat */
+#include<linux/workqueue.h> /* thu vien chua cac ham lam viec voi workqueue */
 
 #include "vchar_driver.h" /* thu vien mo ta cac thanh ghi cua vchar device */
 
 #define DRIVER_AUTHOR "Nguyen Tien Dat <dat.a3cbq91@gmail.com>"
 #define DRIVER_DESC   "A sample character device driver"
-#define DRIVER_VERSION "3.0"
+#define DRIVER_VERSION "3.4"
 #define MAGICAL_NUMBER 243
 #define IRQ_NUMBER 11
 #define VCHAR_CLR_DATA_REGS _IO(MAGICAL_NUMBER, 0)
@@ -53,6 +54,8 @@ struct _vchar_drv {
 	struct cdev *vcdev;
 	unsigned int open_cnt;
 	volatile uint32_t intr_cnt;
+	struct work_struct *vchar_dynamic_work;
+	struct delayed_work *vchar_dynamic_delayed_work;
 	unsigned long start_time;
 	struct timer_list vchar_ktimer;
 } vchar_drv;
@@ -198,12 +201,19 @@ void vchar_hw_enable_write(vchar_dev_t *hw, unsigned char isEnable)
 }
 
 /* ham xu ly tin hieu ngat gui tu thiet bi */
+void vchar_hw_bh_task(struct work_struct *task)
+{
+	printk(KERN_INFO "[Tasks in bottom-half][Workqueue][CPU %d]\n", smp_processor_id());
+}
+
 irqreturn_t vchar_hw_isr(int irq, void *dev)
 {
 	/* xu ly cac cong viec thuoc phan top-half */
 	vchar_drv.intr_cnt++;
 
 	/* kich hoat ham xu ly cac cong viec thuoc phan bottom-half */
+	schedule_work_on(0, vchar_drv.vchar_dynamic_work);
+	schedule_delayed_work_on(1, vchar_drv.vchar_dynamic_delayed_work, 2*HZ);
 
 	return IRQ_HANDLED;
 }
@@ -474,6 +484,18 @@ static int __init vchar_driver_init(void)
 		printk("failed to register ISR\n");
 		goto failed_allocate_cdev;
 	}
+	vchar_drv.vchar_dynamic_work = kzalloc(sizeof(struct work_struct), GFP_KERNEL);
+	if(vchar_drv.vchar_dynamic_work == NULL) {
+		printk(KERN_ERR "failed to allocate memory for work item\n");
+		goto failed_allocate_work;
+	}
+	INIT_WORK(vchar_drv.vchar_dynamic_work, vchar_hw_bh_task);
+	vchar_drv.vchar_dynamic_delayed_work = kzalloc(sizeof(struct delayed_work), GFP_KERNEL);
+	if(vchar_drv.vchar_dynamic_delayed_work == NULL) {
+		printk(KERN_ERR "faield to allocate memory for delayed work item\n");
+		goto failed_allocate_delayed_work;
+	}
+	INIT_DELAYED_WORK(vchar_drv.vchar_dynamic_delayed_work, vchar_hw_bh_task);
 
 	/* tao file /proc/vchar_proc. Vai tro cua file nay tuong tu VCHAR_GET_STS_REGS */
 	if(NULL == proc_create("vchar_proc", 0666, NULL, &proc_fops)) {
@@ -490,6 +512,10 @@ static int __init vchar_driver_init(void)
 	return 0;
 
 failed_create_proc:
+	cancel_delayed_work_sync(vchar_drv.vchar_dynamic_delayed_work);
+failed_allocate_delayed_work:
+	cancel_work_sync(vchar_drv.vchar_dynamic_work);
+failed_allocate_work:
 	free_irq(IRQ_NUMBER, &(vchar_drv.vcdev));
 failed_allocate_cdev:
 	vchar_hw_exit(vchar_drv.vchar_hw);
@@ -515,6 +541,8 @@ static void __exit vchar_driver_exit(void)
 	remove_proc_entry("vchar_proc", NULL);
 
 	/* huy dang ky xu ly ngat */
+	cancel_work_sync(vchar_drv.vchar_dynamic_work);
+	cancel_delayed_work_sync(vchar_drv.vchar_dynamic_delayed_work);
 	free_irq(IRQ_NUMBER, &(vchar_drv.vcdev));
 
 	/* huy dang ky entry point voi kernel */
