@@ -18,12 +18,13 @@
 #include <linux/jiffies.h> /* thu vien nay chua cac ham de lay system uptime */
 #include <linux/timer.h> /* thu vien nay chua cac ham thao tac voi kernel timer */
 #include<linux/interrupt.h> /* thu vien chua cac ham dang ky va dieu khien ngat */
+#include<linux/workqueue.h> /* thu vien chua cac ham lam viec voi workqueue */
 
 #include "vchar_driver.h" /* thu vien mo ta cac thanh ghi cua vchar device */
 
 #define DRIVER_AUTHOR "Nguyen Tien Dat <dat.a3cbq91@gmail.com>"
 #define DRIVER_DESC   "A sample character device driver"
-#define DRIVER_VERSION "3.0"
+#define DRIVER_VERSION "3.5"
 #define MAGICAL_NUMBER 243
 #define IRQ_NUMBER 11
 #define VCHAR_CLR_DATA_REGS _IO(MAGICAL_NUMBER, 0)
@@ -55,6 +56,7 @@ struct _vchar_drv {
 	volatile uint32_t intr_cnt;
 	unsigned long start_time;
 	struct timer_list vchar_ktimer;
+	struct workqueue_struct *workqueue;
 } vchar_drv;
 
 typedef struct vchar_ktimer_data {
@@ -198,12 +200,21 @@ void vchar_hw_enable_write(vchar_dev_t *hw, unsigned char isEnable)
 }
 
 /* ham xu ly tin hieu ngat gui tu thiet bi */
+void vchar_hw_bh_task(struct work_struct *task)
+{
+	printk(KERN_INFO "[Tasks in bottom-half][Workqueue][CPU %d]\n", smp_processor_id());
+}
+DECLARE_WORK(vchar_static_work, vchar_hw_bh_task);
+DECLARE_DELAYED_WORK(vchar_static_delayed_work, vchar_hw_bh_task);
+
 irqreturn_t vchar_hw_isr(int irq, void *dev)
 {
 	/* xu ly cac cong viec thuoc phan top-half */
 	vchar_drv.intr_cnt++;
 
 	/* kich hoat ham xu ly cac cong viec thuoc phan bottom-half */
+	queue_work_on(0, vchar_drv.workqueue, &vchar_static_work);
+	queue_delayed_work_on(1, vchar_drv.workqueue, &vchar_static_delayed_work, 2*HZ);
 
 	return IRQ_HANDLED;
 }
@@ -474,6 +485,11 @@ static int __init vchar_driver_init(void)
 		printk("failed to register ISR\n");
 		goto failed_allocate_cdev;
 	}
+	vchar_drv.workqueue = create_workqueue("vchar_workqueue");
+	if(vchar_drv.workqueue == NULL) {
+		printk("failed to create user workqueue");
+		goto failed_create_workqueue;
+	}
 
 	/* tao file /proc/vchar_proc. Vai tro cua file nay tuong tu VCHAR_GET_STS_REGS */
 	if(NULL == proc_create("vchar_proc", 0666, NULL, &proc_fops)) {
@@ -490,6 +506,8 @@ static int __init vchar_driver_init(void)
 	return 0;
 
 failed_create_proc:
+	destroy_workqueue(vchar_drv.workqueue);
+failed_create_workqueue:
 	free_irq(IRQ_NUMBER, &(vchar_drv.vcdev));
 failed_allocate_cdev:
 	vchar_hw_exit(vchar_drv.vchar_hw);
@@ -515,6 +533,9 @@ static void __exit vchar_driver_exit(void)
 	remove_proc_entry("vchar_proc", NULL);
 
 	/* huy dang ky xu ly ngat */
+	cancel_work_sync(&vchar_static_work);
+	cancel_delayed_work_sync(&vchar_static_delayed_work);
+	destroy_workqueue(vchar_drv.workqueue);
 	free_irq(IRQ_NUMBER, &(vchar_drv.vcdev));
 
 	/* huy dang ky entry point voi kernel */
