@@ -17,13 +17,15 @@
 #include <linux/timekeeping.h> /* thu vien nay chua cac ham de lay wall time */
 #include <linux/jiffies.h> /* thu vien nay chua cac ham de lay system uptime */
 #include <linux/timer.h> /* thu vien nay chua cac ham thao tac voi kernel timer */
+#include<linux/interrupt.h> /* thu vien chua cac ham dang ky va dieu khien ngat */
 
 #include "vchar_driver.h" /* thu vien mo ta cac thanh ghi cua vchar device */
 
 #define DRIVER_AUTHOR "Nguyen Tien Dat <dat.a3cbq91@gmail.com>"
 #define DRIVER_DESC   "A sample character device driver"
-#define DRIVER_VERSION "2.3"
+#define DRIVER_VERSION "3.0"
 #define MAGICAL_NUMBER 243
+#define IRQ_NUMBER 11
 #define VCHAR_CLR_DATA_REGS _IO(MAGICAL_NUMBER, 0)
 #define VCHAR_GET_STS_REGS  _IOR(MAGICAL_NUMBER, 1, sts_regs_t *)
 #define VCHAR_SET_RD_DATA_REGS _IOW(MAGICAL_NUMBER, 2, unsigned char *)
@@ -50,6 +52,7 @@ struct _vchar_drv {
 	vchar_dev_t * vchar_hw;
 	struct cdev *vcdev;
 	unsigned int open_cnt;
+	volatile uint32_t intr_cnt;
 	unsigned long start_time;
 	struct timer_list vchar_ktimer;
 } vchar_drv;
@@ -195,6 +198,15 @@ void vchar_hw_enable_write(vchar_dev_t *hw, unsigned char isEnable)
 }
 
 /* ham xu ly tin hieu ngat gui tu thiet bi */
+irqreturn_t vchar_hw_isr(int irq, void *dev)
+{
+	/* xu ly cac cong viec thuoc phan top-half */
+	vchar_drv.intr_cnt++;
+
+	/* kich hoat ham xu ly cac cong viec thuoc phan bottom-half */
+
+	return IRQ_HANDLED;
+}
 
 /******************************* device specific - END *****************************/
 
@@ -380,7 +392,8 @@ static void handle_timer(unsigned long data)
 	/* xu ly du lieu */
 	++pdata->param1;
 	--pdata->param2;
-	printk(KERN_INFO "Information: %d & %d\n", pdata->param1, pdata->param2);
+	asm("int $0x3B");
+	printk(KERN_INFO "[CPU %d] interrupt counter %d\n", smp_processor_id(), vchar_drv.intr_cnt);
 
 	/*
 	 * Neu muon kernel timer tiep tuc hoat dong thi can
@@ -456,6 +469,11 @@ static int __init vchar_driver_init(void)
 	}
 
 	/* dang ky ham xu ly ngat */
+	ret = request_irq(IRQ_NUMBER, vchar_hw_isr, IRQF_SHARED, "vchar_dev", (void*)&(vchar_drv.vcdev));
+	if(ret) {
+		printk("failed to register ISR\n");
+		goto failed_allocate_cdev;
+	}
 
 	/* tao file /proc/vchar_proc. Vai tro cua file nay tuong tu VCHAR_GET_STS_REGS */
 	if(NULL == proc_create("vchar_proc", 0666, NULL, &proc_fops)) {
@@ -472,6 +490,7 @@ static int __init vchar_driver_init(void)
 	return 0;
 
 failed_create_proc:
+	free_irq(IRQ_NUMBER, &(vchar_drv.vcdev));
 failed_allocate_cdev:
 	vchar_hw_exit(vchar_drv.vchar_hw);
 failed_init_hw:
@@ -496,6 +515,7 @@ static void __exit vchar_driver_exit(void)
 	remove_proc_entry("vchar_proc", NULL);
 
 	/* huy dang ky xu ly ngat */
+	free_irq(IRQ_NUMBER, &(vchar_drv.vcdev));
 
 	/* huy dang ky entry point voi kernel */
 	cdev_del(vchar_drv.vcdev);
