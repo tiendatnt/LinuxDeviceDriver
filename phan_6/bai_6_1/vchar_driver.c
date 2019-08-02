@@ -24,13 +24,15 @@
 
 #define DRIVER_AUTHOR "Nguyen Tien Dat <dat.a3cbq91@gmail.com>"
 #define DRIVER_DESC   "A sample character device driver"
-#define DRIVER_VERSION "3.3"
+#define DRIVER_VERSION "4.0"
 #define MAGICAL_NUMBER 243
 #define IRQ_NUMBER 11
 #define VCHAR_CLR_DATA_REGS _IO(MAGICAL_NUMBER, 0)
 #define VCHAR_GET_STS_REGS  _IOR(MAGICAL_NUMBER, 1, sts_regs_t *)
 #define VCHAR_SET_RD_DATA_REGS _IOW(MAGICAL_NUMBER, 2, unsigned char *)
 #define VCHAR_SET_WR_DATA_REGS _IOW(MAGICAL_NUMBER, 3, unsigned char *)
+#define VCHAR_CHANGE_DATA_IN_CRITICAL_RESOURCE _IO(MAGICAL_NUMBER, 5)
+#define VCHAR_SHOW_THEN_RESET_CRITICAL_RESOURCE _IO(MAGICAL_NUMBER, 6)
 
 typedef struct {
         unsigned char read_count_h_reg;
@@ -56,6 +58,7 @@ struct _vchar_drv {
 	volatile uint32_t intr_cnt;
 	unsigned long start_time;
 	struct timer_list vchar_ktimer;
+	unsigned int critical_resource;
 } vchar_drv;
 
 typedef struct vchar_ktimer_data {
@@ -289,7 +292,7 @@ static ssize_t vchar_driver_write(struct file *filp, const char __user *user_buf
 static long vchar_driver_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
 	int ret = 0;
-	printk(KERN_INFO "Handle ioctl event (cmd: %u)\n", cmd);
+	//printk(KERN_INFO "Handle ioctl event (cmd: %u)\n", cmd);
 
 	switch(cmd) {
 		case VCHAR_CLR_DATA_REGS:
@@ -325,6 +328,17 @@ static long vchar_driver_ioctl(struct file *filp, unsigned int cmd, unsigned lon
 			printk(KERN_INFO "Got information from status registers\n");
 		}
 			break;
+		case VCHAR_CHANGE_DATA_IN_CRITICAL_RESOURCE:
+		{
+			vchar_drv.critical_resource += 1;
+		}
+			break;
+		case VCHAR_SHOW_THEN_RESET_CRITICAL_RESOURCE:
+		{
+			printk(KERN_INFO "data in critical resource: %d\n", vchar_drv.critical_resource);
+			vchar_drv.critical_resource = 0;
+			break;
+		}
 	}
 	return ret;
 }
