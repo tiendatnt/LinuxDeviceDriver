@@ -24,7 +24,7 @@
 
 #define DRIVER_AUTHOR "Nguyen Tien Dat <dat.a3cbq91@gmail.com>"
 #define DRIVER_DESC   "A sample character device driver"
-#define DRIVER_VERSION "4.0"
+#define DRIVER_VERSION "4.1"
 #define MAGICAL_NUMBER 243
 #define IRQ_NUMBER 11
 #define VCHAR_CLR_DATA_REGS _IO(MAGICAL_NUMBER, 0)
@@ -58,7 +58,7 @@ struct _vchar_drv {
 	volatile uint32_t intr_cnt;
 	unsigned long start_time;
 	struct timer_list vchar_ktimer;
-	unsigned int critical_resource;
+	atomic_t critical_resource;
 } vchar_drv;
 
 typedef struct vchar_ktimer_data {
@@ -330,13 +330,13 @@ static long vchar_driver_ioctl(struct file *filp, unsigned int cmd, unsigned lon
 			break;
 		case VCHAR_CHANGE_DATA_IN_CRITICAL_RESOURCE:
 		{
-			vchar_drv.critical_resource += 1;
+			atomic_inc(&vchar_drv.critical_resource);
 		}
 			break;
 		case VCHAR_SHOW_THEN_RESET_CRITICAL_RESOURCE:
 		{
-			printk(KERN_INFO "data in critical resource: %d\n", vchar_drv.critical_resource);
-			vchar_drv.critical_resource = 0;
+			printk(KERN_INFO "data in critical resource: %d\n", atomic_read(&vchar_drv.critical_resource));
+			atomic_set(&vchar_drv.critical_resource, 0);
 			break;
 		}
 	}
