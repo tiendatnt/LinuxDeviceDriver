@@ -19,12 +19,13 @@
 #include <linux/timer.h> /* thu vien nay chua cac ham thao tac voi kernel timer */
 #include<linux/interrupt.h> /* thu vien chua cac ham dang ky va dieu khien ngat */
 #include<linux/workqueue.h> /* thu vien chua cac ham lam viec voi workqueue */
+#include<linux/semaphore.h> /* thu vien chua cac ham lam viec voi semaphore */
 
 #include "vchar_driver.h" /* thu vien mo ta cac thanh ghi cua vchar device */
 
 #define DRIVER_AUTHOR "Nguyen Tien Dat <dat.a3cbq91@gmail.com>"
 #define DRIVER_DESC   "A sample character device driver"
-#define DRIVER_VERSION "4.0"
+#define DRIVER_VERSION "4.4"
 #define MAGICAL_NUMBER 243
 #define IRQ_NUMBER 11
 #define VCHAR_CLR_DATA_REGS _IO(MAGICAL_NUMBER, 0)
@@ -49,6 +50,7 @@ typedef struct vchar_dev {
 } vchar_dev_t;
 
 struct _vchar_drv {
+	struct semaphore vchar_sem;
 	dev_t dev_num;
 	struct class *dev_class;
 	struct device *dev;
@@ -330,7 +332,9 @@ static long vchar_driver_ioctl(struct file *filp, unsigned int cmd, unsigned lon
 			break;
 		case VCHAR_CHANGE_DATA_IN_CRITICAL_RESOURCE:
 		{
+			down(&vchar_drv.vchar_sem);
 			vchar_drv.critical_resource += 1;
+			up(&vchar_drv.vchar_sem);
 		}
 			break;
 		case VCHAR_SHOW_THEN_RESET_CRITICAL_RESOURCE:
@@ -471,6 +475,7 @@ static int __init vchar_driver_init(void)
 		ret = -ENOMEM;
 		goto failed_allocate_structure;
 	}
+	sema_init(&vchar_drv.vchar_sem, 1);
 
 	/* khoi tao thiet bi vat ly */
 	ret = vchar_hw_init(vchar_drv.vchar_hw);
