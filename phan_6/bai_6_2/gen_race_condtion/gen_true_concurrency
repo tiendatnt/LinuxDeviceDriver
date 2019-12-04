@@ -1,0 +1,6 @@
+#!/bin/bash
+
+taskset 0x2 ./change_resource &
+taskset 0x4 ./change_resource &
+taskset 0x8 ./change_resource &
+
