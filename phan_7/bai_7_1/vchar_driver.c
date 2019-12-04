@@ -9,7 +9,7 @@
 #include <linux/module.h> /* thu vien nay dinh nghia cac macro nhu module_init va module_exit */
 #include <linux/fs.h> /* thu vien nay dinh nghia cac ham cap phat/giai phong device number */
 #include <linux/device.h> /* thu vien nay chua cac ham phuc vu viec tao device file */
-#include <linux/slab.h> /* thu vien nay chua cac ham kmalloc va kfree */
+#include <linux/vmalloc.h> /* thu vien nay chua cac ham vmalloc va vfree */
 #include <linux/cdev.h> /* thu vien nay chua cac ham lam viec voi cdev */
 #include <linux/uaccess.h> /* thu vien nay chua cac ham trao doi du lieu giua user va kernel */
 #include <linux/ioctl.h> /* thu vien nay chua cac ham phuc vu ioctl */
@@ -18,7 +18,7 @@
 
 #define DRIVER_AUTHOR "Nguyen Tien Dat <dat.a3cbq91@gmail.com>"
 #define DRIVER_DESC   "A sample character device driver"
-#define DRIVER_VERSION "0.8"
+#define DRIVER_VERSION "5.0"
 #define MAGICAL_NUMBER 243
 #define VCHAR_CLR_DATA_REGS _IO(MAGICAL_NUMBER, 0)
 #define VCHAR_GET_STS_REGS  _IOR(MAGICAL_NUMBER, 1, sts_regs_t *)
@@ -53,7 +53,7 @@ struct _vchar_drv {
 int vchar_hw_init(vchar_dev_t *hw)
 {
 	char * buf;
-	buf = kzalloc(NUM_DEV_REGS * REG_SIZE, GFP_KERNEL);
+	buf = vmalloc(NUM_DEV_REGS * REG_SIZE);
 	if (!buf) {
 		return -ENOMEM;
 	}
@@ -72,7 +72,7 @@ int vchar_hw_init(vchar_dev_t *hw)
 /* ham giai phong thiet bi */
 void vchar_hw_exit(vchar_dev_t *hw)
 {
-	kfree(hw->control_regs);
+	vfree(hw->control_regs);
 }
 
 
@@ -209,7 +209,7 @@ static ssize_t vchar_driver_read(struct file *filp, char __user *user_buf, size_
 
 	printk("Handle read event start from %lld, %zu bytes\n", *off, len);
 
-	kernel_buf = kzalloc(len, GFP_KERNEL);
+	kernel_buf = vmalloc(len);
 	if(kernel_buf == NULL)
 		return 0;
 
@@ -231,7 +231,7 @@ static ssize_t vchar_driver_write(struct file *filp, const char __user *user_buf
 	int num_bytes = 0;
 	printk("Handle write event start from %lld, %zu bytes\n", *off, len);
 
-	kernel_buf = kzalloc(len, GFP_KERNEL);
+	kernel_buf = vmalloc(len);
 	if(copy_from_user(kernel_buf, user_buf, len))
 		return -EFAULT;
 
@@ -325,7 +325,7 @@ static int __init vchar_driver_init(void)
 	}
 
 	/* cap phat bo nho cho cac cau truc du lieu cua driver va khoi tao */
-	vchar_drv.vchar_hw = kzalloc(sizeof(vchar_dev_t), GFP_KERNEL);
+	vchar_drv.vchar_hw = vmalloc(sizeof(vchar_dev_t));
 	if(!vchar_drv.vchar_hw) {
 		printk("failed to allocate data structure of the driver\n");
 		ret = -ENOMEM;
@@ -360,7 +360,7 @@ static int __init vchar_driver_init(void)
 failed_allocate_cdev:
 	vchar_hw_exit(vchar_drv.vchar_hw);
 failed_init_hw:
-	kfree(vchar_drv.vchar_hw);
+	vfree(vchar_drv.vchar_hw);
 failed_allocate_structure:
 	device_destroy(vchar_drv.dev_class, vchar_drv.dev_num);
 failed_create_device:
@@ -383,7 +383,7 @@ static void __exit vchar_driver_exit(void)
 	vchar_hw_exit(vchar_drv.vchar_hw);
 
 	/* giai phong bo nho da cap phat cau truc du lieu cua driver */
-	kfree(vchar_drv.vchar_hw);
+	vfree(vchar_drv.vchar_hw);
 
 	/* xoa bo device file */
 	device_destroy(vchar_drv.dev_class, vchar_drv.dev_num);
