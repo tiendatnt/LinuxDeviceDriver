@@ -10,6 +10,7 @@
 #include <linux/fs.h> /* thu vien nay dinh nghia cac ham cap phat/giai phong device number */
 #include <linux/device.h> /* thu vien nay chua cac ham phuc vu viec tao device file */
 #include <linux/slab.h> /* thu vien nay chua cac ham kmalloc va kfree */
+#include <linux/gfp.h> /* thu vien nay chua ham get_zeroed_page */
 #include <linux/cdev.h> /* thu vien nay chua cac ham lam viec voi cdev */
 #include <linux/uaccess.h> /* thu vien nay chua cac ham trao doi du lieu giua user va kernel */
 #include <linux/ioctl.h> /* thu vien nay chua cac ham phuc vu ioctl */
@@ -18,7 +19,7 @@
 
 #define DRIVER_AUTHOR "Nguyen Tien Dat <dat.a3cbq91@gmail.com>"
 #define DRIVER_DESC   "A sample character device driver"
-#define DRIVER_VERSION "0.8"
+#define DRIVER_VERSION "5.1"
 #define MAGICAL_NUMBER 243
 #define VCHAR_CLR_DATA_REGS _IO(MAGICAL_NUMBER, 0)
 #define VCHAR_GET_STS_REGS  _IOR(MAGICAL_NUMBER, 1, sts_regs_t *)
@@ -53,7 +54,7 @@ struct _vchar_drv {
 int vchar_hw_init(vchar_dev_t *hw)
 {
 	char * buf;
-	buf = kzalloc(NUM_DEV_REGS * REG_SIZE, GFP_KERNEL);
+	buf = (char *)get_zeroed_page(GFP_KERNEL);
 	if (!buf) {
 		return -ENOMEM;
 	}
@@ -72,7 +73,7 @@ int vchar_hw_init(vchar_dev_t *hw)
 /* ham giai phong thiet bi */
 void vchar_hw_exit(vchar_dev_t *hw)
 {
-	kfree(hw->control_regs);
+	free_page((unsigned long)hw->control_regs);
 }
 
 
