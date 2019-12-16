@@ -18,12 +18,13 @@
 
 #define DRIVER_AUTHOR "Nguyen Tien Dat <dat.a3cbq91@gmail.com>"
 #define DRIVER_DESC   "A sample character device driver"
-#define DRIVER_VERSION "0.8"
+#define DRIVER_VERSION "5.2"
 #define MAGICAL_NUMBER 243
 #define VCHAR_CLR_DATA_REGS _IO(MAGICAL_NUMBER, 0)
 #define VCHAR_GET_STS_REGS  _IOR(MAGICAL_NUMBER, 1, sts_regs_t *)
 #define VCHAR_SET_RD_DATA_REGS _IOW(MAGICAL_NUMBER, 2, unsigned char *)
 #define VCHAR_SET_WR_DATA_REGS _IOW(MAGICAL_NUMBER, 3, unsigned char *)
+#define OBJ_SIZE (NUM_DATA_REGS * REG_SIZE)
 
 typedef struct {
         unsigned char read_count_h_reg;
@@ -46,6 +47,7 @@ struct _vchar_drv {
 	vchar_dev_t * vchar_hw;
 	struct cdev *vcdev;
 	unsigned int open_cnt;
+	struct kmem_cache *vchar_cachep;
 } vchar_drv;
 
 /****************************** device specific - START *****************************/
@@ -209,7 +211,7 @@ static ssize_t vchar_driver_read(struct file *filp, char __user *user_buf, size_
 
 	printk("Handle read event start from %lld, %zu bytes\n", *off, len);
 
-	kernel_buf = kzalloc(len, GFP_KERNEL);
+	kernel_buf = kmem_cache_alloc(vchar_drv.vchar_cachep, GFP_KERNEL);
 	if(kernel_buf == NULL)
 		return 0;
 
@@ -220,6 +222,7 @@ static ssize_t vchar_driver_read(struct file *filp, char __user *user_buf, size_
 		return -EFAULT;
 	if(copy_to_user(user_buf, kernel_buf, num_bytes))
 		return -EFAULT;
+	kmem_cache_free(vchar_drv.vchar_cachep, kernel_buf);
 
 	*off += num_bytes;
 	return num_bytes;
@@ -231,9 +234,11 @@ static ssize_t vchar_driver_write(struct file *filp, const char __user *user_buf
 	int num_bytes = 0;
 	printk("Handle write event start from %lld, %zu bytes\n", *off, len);
 
-	kernel_buf = kzalloc(len, GFP_KERNEL);
+	kernel_buf = kmem_cache_alloc(vchar_drv.vchar_cachep, GFP_KERNEL);
+
 	if(copy_from_user(kernel_buf, user_buf, len))
 		return -EFAULT;
+	kmem_cache_free(vchar_drv.vchar_cachep, kernel_buf);
 
 	num_bytes = vchar_hw_write_data(vchar_drv.vchar_hw, *off, len, kernel_buf);
 	printk("writes %d bytes to HW\n", num_bytes);
@@ -298,6 +303,13 @@ static struct file_operations fops =
 	.unlocked_ioctl = vchar_driver_ioctl,
 };
 
+/* ham khoi tao cho object trong lookaside cache */
+void init_object_lookaside(void* obj)
+{
+	char* p = (char*)obj;
+	memset(p, 0, OBJ_SIZE);
+}
+
 /* ham khoi tao driver */
 static int __init vchar_driver_init(void)
 {
@@ -352,11 +364,20 @@ static int __init vchar_driver_init(void)
 		goto failed_allocate_cdev;
 	}
 
+	/* tao kmem lookaside cache */
+	vchar_drv.vchar_cachep = kmem_cache_create("vchar_cache", OBJ_SIZE, 0, SLAB_PANIC, init_object_lookaside);
+	if (vchar_drv.vchar_cachep == NULL) {
+		printk("failed to create lookaside cache\n");
+		goto failed_create_lookaside;
+	}
+
 	/* dang ky ham xu ly ngat */
 
 	printk("Initialize vchar driver successfully\n");
 	return 0;
 
+failed_create_lookaside:
+	cdev_del(vchar_drv.vcdev);
 failed_allocate_cdev:
 	vchar_hw_exit(vchar_drv.vchar_hw);
 failed_init_hw:
@@ -375,6 +396,9 @@ failed_register_devnum:
 static void __exit vchar_driver_exit(void)
 {
 	/* huy dang ky xu ly ngat */
+
+	/* huy kmem lookaside cache */
+	kmem_cache_destroy(vchar_drv.vchar_cachep);
 
 	/* huy dang ky entry point voi kernel */
 	cdev_del(vchar_drv.vcdev);
