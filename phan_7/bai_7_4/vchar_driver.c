@@ -13,17 +13,22 @@
 #include <linux/cdev.h> /* thu vien nay chua cac ham lam viec voi cdev */
 #include <linux/uaccess.h> /* thu vien nay chua cac ham trao doi du lieu giua user va kernel */
 #include <linux/ioctl.h> /* thu vien nay chua cac ham phuc vu ioctl */
+#include <linux/ioport.h> /* thu vien nay chua cac ham phuc vu PIO */
 
 #include "vchar_driver.h" /* thu vien mo ta cac thanh ghi cua vchar device */
 
 #define DRIVER_AUTHOR "Nguyen Tien Dat <dat.a3cbq91@gmail.com>"
 #define DRIVER_DESC   "A sample character device driver"
-#define DRIVER_VERSION "0.8"
+#define DRIVER_VERSION "5.3"
 #define MAGICAL_NUMBER 243
 #define VCHAR_CLR_DATA_REGS _IO(MAGICAL_NUMBER, 0)
 #define VCHAR_GET_STS_REGS  _IOR(MAGICAL_NUMBER, 1, sts_regs_t *)
 #define VCHAR_SET_RD_DATA_REGS _IOW(MAGICAL_NUMBER, 2, unsigned char *)
 #define VCHAR_SET_WR_DATA_REGS _IOW(MAGICAL_NUMBER, 3, unsigned char *)
+#define VCHAR_IOPORT_BASE 0x0030
+#define VCHAR_IOPORT_LEN 16
+#define VCHAR_IOPORT_NAME "vchar ports"
+#define VCHAR_IOPORT(x) (0x0030 + x)
 
 typedef struct {
         unsigned char read_count_h_reg;
@@ -46,6 +51,7 @@ struct _vchar_drv {
 	vchar_dev_t * vchar_hw;
 	struct cdev *vcdev;
 	unsigned int open_cnt;
+	struct resource *r;
 } vchar_drv;
 
 /****************************** device specific - START *****************************/
@@ -352,6 +358,13 @@ static int __init vchar_driver_init(void)
 		goto failed_allocate_cdev;
 	}
 
+	/* yeu cau kernel cho phep su dung mot port region */
+	vchar_drv.r = request_region(VCHAR_IOPORT_BASE, VCHAR_IOPORT_LEN, VCHAR_IOPORT_NAME);
+	if (vchar_drv.r) {
+		printk("vchar io port(8) = 0x%x\n", inb(VCHAR_IOPORT(8)));
+
+	}
+
 	/* dang ky ham xu ly ngat */
 
 	printk("Initialize vchar driver successfully\n");
@@ -375,6 +388,10 @@ failed_register_devnum:
 static void __exit vchar_driver_exit(void)
 {
 	/* huy dang ky xu ly ngat */
+
+	/* giai phong IO port region da dang ky */
+	if (vchar_drv.r)
+		release_region(VCHAR_IOPORT_BASE, VCHAR_IOPORT_LEN);
 
 	/* huy dang ky entry point voi kernel */
 	cdev_del(vchar_drv.vcdev);
