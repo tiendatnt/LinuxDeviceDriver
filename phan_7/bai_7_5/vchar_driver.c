@@ -10,6 +10,7 @@
 #include <linux/fs.h> /* thu vien nay dinh nghia cac ham cap phat/giai phong device number */
 #include <linux/device.h> /* thu vien nay chua cac ham phuc vu viec tao device file */
 #include <linux/slab.h> /* thu vien nay chua cac ham kmalloc va kfree */
+#include <linux/mm.h> /*thu vien nay chua ham remap_pfn_range */
 #include <linux/cdev.h> /* thu vien nay chua cac ham lam viec voi cdev */
 #include <linux/uaccess.h> /* thu vien nay chua cac ham trao doi du lieu giua user va kernel */
 #include <linux/ioctl.h> /* thu vien nay chua cac ham phuc vu ioctl */
@@ -18,7 +19,7 @@
 
 #define DRIVER_AUTHOR "Nguyen Tien Dat <dat.a3cbq91@gmail.com>"
 #define DRIVER_DESC   "A sample character device driver"
-#define DRIVER_VERSION "0.8"
+#define DRIVER_VERSION "5.4"
 #define MAGICAL_NUMBER 243
 #define VCHAR_CLR_DATA_REGS _IO(MAGICAL_NUMBER, 0)
 #define VCHAR_GET_STS_REGS  _IOR(MAGICAL_NUMBER, 1, sts_regs_t *)
@@ -53,14 +54,14 @@ struct _vchar_drv {
 int vchar_hw_init(vchar_dev_t *hw)
 {
 	char * buf;
-	buf = kzalloc(NUM_DEV_REGS * REG_SIZE, GFP_KERNEL);
+	buf = kzalloc((NUM_CTRL_REGS + NUM_STS_REGS) * REG_SIZE, GFP_KERNEL);
 	if (!buf) {
 		return -ENOMEM;
 	}
 
 	hw->control_regs = buf;
 	hw->status_regs = hw->control_regs + NUM_CTRL_REGS;
-	hw->data_regs = hw->status_regs + NUM_STS_REGS;
+	hw->data_regs = (char *)get_zeroed_page(GFP_KERNEL);
 
 	//khoi tao gia tri ban dau cho cac thanh ghi
 	hw->control_regs[CONTROL_ACCESS_REG] = 0x03;
@@ -73,6 +74,7 @@ int vchar_hw_init(vchar_dev_t *hw)
 void vchar_hw_exit(vchar_dev_t *hw)
 {
 	kfree(hw->control_regs);
+	free_page((unsigned long)hw->data_regs);
 }
 
 
@@ -288,6 +290,32 @@ static long vchar_driver_ioctl(struct file *filp, unsigned int cmd, unsigned lon
 	return ret;
 }
 
+static int vchar_driver_mmap(struct file *file, struct vm_area_struct *vma)
+{
+	unsigned long offset, mapped_area_size, phy_addr, pfn;
+	unsigned long data_mem_size = PAGE_SIZE; //kich thuoc vung nho du lieu cua vchar device
+
+	offset = vma->vm_pgoff << PAGE_SHIFT;
+	if (offset >= data_mem_size)
+		return -EINVAL;
+
+	mapped_area_size = vma->vm_end - vma->vm_start;
+	if (mapped_area_size > data_mem_size - offset)
+		return -EINVAL;
+
+	phy_addr = virt_to_phys(vchar_drv.vchar_hw->data_regs + offset);
+	pfn = phy_addr >> PAGE_SHIFT;
+
+	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
+	if(io_remap_pfn_range(vma, vma->vm_start, pfn, mapped_area_size, vma->vm_page_prot)) {
+		return -EAGAIN;
+	}
+
+	printk("map vchar dev's data memory at phy_addr 0x%lx to vma 0x%lx-0x%lx (%lu bytes)\n",
+		phy_addr, vma->vm_start, vma->vm_end, mapped_area_size);
+	return 0;
+}
+
 static struct file_operations fops =
 {
 	.owner   = THIS_MODULE,
@@ -295,6 +323,7 @@ static struct file_operations fops =
 	.release = vchar_driver_release,
 	.read    = vchar_driver_read,
 	.write   = vchar_driver_write,
+	.mmap    = vchar_driver_mmap,
 	.unlocked_ioctl = vchar_driver_ioctl,
 };
 

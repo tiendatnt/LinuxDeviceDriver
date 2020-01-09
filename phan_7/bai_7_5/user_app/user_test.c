@@ -11,6 +11,7 @@
 #include <fcntl.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/mman.h>
 
 typedef struct {
         unsigned char read_count_h;
@@ -142,6 +143,30 @@ void control_write_chardev() {
 		printf("Disable to write to data registers successful\n");
 }
 
+void mem_map_chardev()
+{
+	//anh xa kernel buffer vao vung mapped area tren user space
+	int fd = open_chardev();
+	off_t offset = 0;
+	size_t mapped_size = getpagesize();
+	char* mapped_area = mmap(NULL, mapped_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, offset);
+	if(mapped_area == MAP_FAILED) {
+		printf("memory mapping failed\n");
+		return;
+	}
+	close_chardev(fd);
+
+	//ghi du lieu vao vung mapped area
+	printf("Enter your message: ");
+	scanf(" %[^\n]s", mapped_area);
+	printf("Wrote the message to mapped area\n");
+
+	//doc du lieu tu vung mapped area
+	printf("Read a message from mapped area: %s\n", mapped_area);
+
+	//huy vung mapped area
+	munmap((void*)mapped_area, mapped_size);
+}
 
 int main() {
 	int ret = 0;
@@ -152,6 +177,7 @@ int main() {
 	printf("\tc (to close the device node)\n");
 	printf("\tr (to read data from device node\n");
 	printf("\tw (to write data to device node\n");
+	printf("\tm (to map a kernel buffer into user space)\n");
 	printf("\tC (to clear data registers)\n");
 	printf("\tR (to enable/disable to read from data registers)\n");
 	printf("\tW (to enable/disable to write to data registers)\n");
@@ -174,6 +200,9 @@ int main() {
 				else
 					printf("%s has not opened yet! Can not close\n", DEVICE_NODE);
 				fd = -1;
+				break;
+			case 'm':
+				mem_map_chardev();
 				break;
 			case 'r':
 				read_data_chardev();
